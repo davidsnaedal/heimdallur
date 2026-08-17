@@ -8,12 +8,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     strictPort: true,
-    allowedHosts: [
-      "heimdallur.dsna.codes",
-      "localhost",
-      "127.0.0.1",
-      "192.168.0.3"
-    ],
+    allowedHosts: [".dsna.codes", "localhost", "127.0.0.1", "192.168.0.3"],
     proxy: {
       "/api": {
         target: apiProxyTarget,
