@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      LBL_API_URL: http://logbirting-search-backend-1:8000
+      DOMAR_API_URL: http://domar-search-backend-1:8000
+      LBL_PUBLIC_URL: https://lbl.dsna.codes
+      DOMAR_PUBLIC_URL: https://judgements.dsna.codes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "192.168.0.3:8003:8000"
+    networks:
+      - default
+      - lbl
+      - domar
+
+  web:
+    build:
+      context: ./web
+    environment:
+      VITE_API_BASE_URL: ""
+      VITE_DEV_API_PROXY: http://backend:8000
+    ports:
+      - "192.168.0.3:5175:5173"
+    depends_on:
+      - backend
+    networks:
+      - default
+
+networks:
+  lbl:
+    external: true
+    name: logbirting-search_default
+  domar:
+    external: true
+    name: domar-search_default

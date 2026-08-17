@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/.mypy_cache/
+web/node_modules/
+web/dist/
+*.pyc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
