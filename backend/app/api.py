@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -19,6 +20,8 @@ from app.settings import (
     SEARCH_TIMEOUT_SECONDS,
     USER_AGENT,
 )
+
+log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="Heimdallur")
 
@@ -182,12 +185,14 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except RuntimeError as e:
+            log.warning("LBL exact failed for %r: %s", parsed.raw, e)
             warnings.append(f"Lögbirtingablað: {e}")
         try:
             domar_payload = fut_domar.result()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except RuntimeError as e:
+            log.warning("Domar exact failed for %r: %s", parsed.raw, e)
             warnings.append(f"Dómar: {e}")
 
     hits = []

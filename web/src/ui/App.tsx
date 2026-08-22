@@ -345,8 +345,11 @@ export function App() {
                   {report.summary}
                 </p>
                 {report.warnings.length > 0 ? (
-                  <div className="mt-2 text-xs text-amber-200">
-                    {report.warnings.join(" · ")}
+                  <div className="mt-3 rounded-xl border border-amber-800/70 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+                    One or more indexes failed, so this list may be incomplete.
+                    <div className="mt-1 text-xs text-amber-200/90">
+                      {report.warnings.join(" · ")}
+                    </div>
                   </div>
                 ) : null}
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -484,7 +487,9 @@ export function App() {
                 ))}
                 {filteredHits.length === 0 ? (
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/20 p-6 text-sm text-slate-300">
-                    No exact matches in the indexed sources.
+                    {report.warnings.length > 0
+                      ? "No results could be shown because an index timed out or failed. Retry the search."
+                      : "No exact matches in the indexed sources."}
                   </div>
                 ) : null}
               </div>
