@@ -3,6 +3,7 @@
 Cross-index **exact** person search over:
 - [Lögbirtingablað](https://lbl.dsna.codes) (logbirting-search)
 - [Dómar](https://judgements.dsna.codes) (domar-search)
+- [Stjórnartíðindi](https://stjornartidindi.dsna.codes) (stjornartidindi-search)
 
 Query must be a **full name** (given name + surname) or a **kennitala** (`DDMMYY-XXXX`). No keyword / partial-name search. Icelandic grammatical case forms of the same name are treated as the same phrase.
 
@@ -18,7 +19,9 @@ Then open (LAN binds — not `0.0.0.0`):
 
 Public URL is **https://heimdallur.dsna.codes** via the **kvik** nginx + Authentik stack (`C:\Users\dave\Projects\kvik`).
 
-The LBL (`logbirting-search`) and Dómar (`domar-search`) stacks must already be running. Heimdallur joins their Docker networks and calls `logbirting-search-backend-1:8000` and `domar-search-backend-1:8000` `/api/exact`.
+To roll back to the stack *before* Stjórnartíðindi was wired in, check out tag `checkpoint/pre-stjornartidindi` on this repo and on kvik (same tag name).
+
+The LBL (`logbirting-search`), Dómar (`domar-search`), and Stjórnartíðindi (`stjornartidindi-search`) stacks must already be running. Heimdallur joins their Docker networks and calls each backend `/api/exact`.
 
 ## Notes
 

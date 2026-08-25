@@ -18,6 +18,8 @@ from app.settings import (
     LBL_API_URL,
     LBL_PUBLIC_URL,
     SEARCH_TIMEOUT_SECONDS,
+    ST_API_URL,
+    ST_PUBLIC_URL,
     USER_AGENT,
 )
 
@@ -136,6 +138,45 @@ def _domar_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _st_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for h in payload.get("hits") or []:
+        date = h.get("publication_date")
+        year = h.get("year") or ((date or "")[:4] or None)
+        pdf_url = h.get("pdf_url") or h.get("source_url")
+        out.append(
+            {
+                "source": "st",
+                "source_label": "Stjórnartíðindi",
+                "id": str(h.get("id")),
+                "title": h.get("title") or h.get("publication_number") or "Advert",
+                "subtitle": " · ".join(
+                    p
+                    for p in (
+                        h.get("publication_number"),
+                        h.get("department"),
+                        h.get("type_title"),
+                    )
+                    if p
+                ),
+                "date": date,
+                "year": year,
+                "preview": h.get("preview") or "",
+                "source_url": pdf_url,
+                "open_url": pdf_url,
+                "preview_kind": "st",
+                "meta": {
+                    "title": h.get("title"),
+                    "publication_number": h.get("publication_number"),
+                    "department": h.get("department"),
+                    "type_title": h.get("type_title"),
+                    "has_pdf": bool(pdf_url),
+                },
+            }
+        )
+    return out
+
+
 def _sort_key(hit: dict[str, Any]) -> tuple:
     date = (hit.get("date") or hit.get("year") or "")[:10]
     return (date == "", date, hit.get("source") or "", hit.get("id") or "")
@@ -144,7 +185,11 @@ def _sort_key(hit: dict[str, Any]) -> tuple:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     indexes: dict[str, Any] = {}
-    for name, base in (("lbl", LBL_API_URL), ("domar", DOMAR_API_URL)):
+    for name, base in (
+        ("lbl", LBL_API_URL),
+        ("domar", DOMAR_API_URL),
+        ("st", ST_API_URL),
+    ):
         try:
             with httpx.Client(timeout=5.0, headers={"User-Agent": USER_AGENT}) as client:
                 resp = client.get(f"{base}/api/health")
@@ -170,6 +215,7 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
     warnings: list[str] = []
     lbl_payload: dict[str, Any] | None = None
     domar_payload: dict[str, Any] | None = None
+    st_payload: dict[str, Any] | None = None
 
     def _lbl() -> dict[str, Any]:
         return _fetch_exact(LBL_API_URL, parsed.raw, limit)
@@ -177,9 +223,13 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
     def _domar() -> dict[str, Any]:
         return _fetch_exact(DOMAR_API_URL, parsed.raw, limit)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    def _st() -> dict[str, Any]:
+        return _fetch_exact(ST_API_URL, parsed.raw, limit)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
         fut_lbl = pool.submit(_lbl)
         fut_domar = pool.submit(_domar)
+        fut_st = pool.submit(_st)
         try:
             lbl_payload = fut_lbl.result()
         except ValueError as e:
@@ -194,17 +244,27 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         except RuntimeError as e:
             log.warning("Domar exact failed for %r: %s", parsed.raw, e)
             warnings.append(f"Dómar: {e}")
+        try:
+            st_payload = fut_st.result()
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except RuntimeError as e:
+            log.warning("Stjornartidindi exact failed for %r: %s", parsed.raw, e)
+            warnings.append(f"Stjórnartíðindi: {e}")
 
     hits = []
     if lbl_payload:
         hits.extend(_lbl_hits(lbl_payload))
     if domar_payload:
         hits.extend(_domar_hits(domar_payload))
+    if st_payload:
+        hits.extend(_st_hits(st_payload))
     hits.sort(key=_sort_key, reverse=True)
 
     by_source = {
         "lbl": 0 if not lbl_payload else int(lbl_payload.get("total") or 0),
         "domar": 0 if not domar_payload else int(domar_payload.get("total") or 0),
+        "st": 0 if not st_payload else int(st_payload.get("total") or 0),
     }
     by_year: dict[str, int] = {}
     for h in hits:
@@ -215,6 +275,7 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
     bits = [
         f'{by_source["lbl"]} Lögbirtingablað',
         f'{by_source["domar"]} dómur/dómar',
+        f'{by_source["st"]} Stjórnartíðindi',
     ]
     summary = f'Exact matches for “{parsed.raw}”: {len(hits)} ({", ".join(bits)}).'
     if parsed.kennitala:
@@ -238,8 +299,28 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         "indexes": {
             "lbl": LBL_PUBLIC_URL,
             "domar": DOMAR_PUBLIC_URL,
+            "st": ST_PUBLIC_URL,
         },
     }
+
+
+def _assert_st_pdf_url(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Missing url")
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Invalid url scheme")
+    host = (parsed.hostname or "").lower()
+    if host not in {
+        "adverts.stjornartidindi.is",
+        "www.stjornartidindi.is",
+        "stjornartidindi.is",
+    }:
+        raise HTTPException(status_code=400, detail="PDF host not allowed")
+    if not (parsed.path or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Not a PDF url")
+    return raw
 
 
 def _assert_lbl_pdf_url(url: str) -> str:
@@ -259,14 +340,19 @@ def _assert_lbl_pdf_url(url: str) -> str:
 
 @app.get("/api/preview")
 def preview_api(
-    source: str = Query(..., description="lbl or domar"),
-    url: str = Query("", description="LBL PDF URL"),
+    source: str = Query(..., description="lbl, domar, or st"),
+    url: str = Query("", description="LBL or Stjórnartíðindi PDF URL"),
     id: str = Query("", description="island.is verdict id"),
 ):
     src = (source or "").strip().lower()
     if src == "lbl":
         pdf_url = _assert_lbl_pdf_url(url)
         upstream_url = f"{LBL_API_URL}/api/preview"
+        params = {"url": pdf_url}
+        filename = (urlparse(pdf_url).path.rsplit("/", 1)[-1] or "document.pdf")
+    elif src == "st":
+        pdf_url = _assert_st_pdf_url(url)
+        upstream_url = f"{ST_API_URL}/api/preview"
         params = {"url": pdf_url}
         filename = (urlparse(pdf_url).path.rsplit("/", 1)[-1] or "document.pdf")
     elif src == "domar":
@@ -277,7 +363,7 @@ def preview_api(
         params = {"id": verdict_id}
         filename = f"{verdict_id}.pdf"
     else:
-        raise HTTPException(status_code=400, detail="source must be lbl or domar")
+        raise HTTPException(status_code=400, detail="source must be lbl, domar, or st")
 
     try:
         client = httpx.Client(

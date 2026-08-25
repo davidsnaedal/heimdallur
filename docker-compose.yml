@@ -5,8 +5,10 @@ services:
     environment:
       LBL_API_URL: http://logbirting-search-backend-1:8000
       DOMAR_API_URL: http://domar-search-backend-1:8000
+      ST_API_URL: http://stjornartidindi-search-backend-1:8000
       LBL_PUBLIC_URL: https://lbl.dsna.codes
       DOMAR_PUBLIC_URL: https://judgements.dsna.codes
+      ST_PUBLIC_URL: https://stjornartidindi.dsna.codes
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -15,6 +17,7 @@ services:
       - default
       - lbl
       - domar
+      - st
 
   web:
     build:
@@ -43,3 +46,6 @@ networks:
   domar:
     external: true
     name: domar-search_default
+  st:
+    external: true
+    name: stjornartidindi-search_default

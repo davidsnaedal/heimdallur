@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-type Source = "lbl" | "domar";
+type Source = "lbl" | "domar" | "st";
 
 type Hit = {
   source: Source;
@@ -24,6 +24,9 @@ type Hit = {
     keywords?: string[];
     has_pdf?: boolean;
     verdict_date?: string | null;
+    publication_number?: string;
+    department?: string;
+    type_title?: string;
   };
 };
 
@@ -33,7 +36,7 @@ type SearchReport = {
   kennitala: string | null;
   name: string | null;
   total: number;
-  by_source: { lbl: number; domar: number };
+  by_source: { lbl: number; domar: number; st: number };
   by_year: Record<string, number>;
   by_type: Record<string, number>;
   by_court: Record<string, number>;
@@ -95,6 +98,9 @@ function previewSrc(hit: Hit): string {
   const url = new URL("/api/preview", origin);
   url.searchParams.set("source", hit.source);
   if (hit.source === "lbl" && hit.source_url) {
+    url.searchParams.set("url", hit.source_url);
+  }
+  if (hit.source === "st" && hit.source_url) {
     url.searchParams.set("url", hit.source_url);
   }
   if (hit.source === "domar") {
@@ -215,6 +221,9 @@ function sourceBadge(source: Source) {
   if (source === "lbl") {
     return "border-amber-700/50 bg-amber-500/15 text-amber-100";
   }
+  if (source === "st") {
+    return "border-emerald-700/50 bg-emerald-500/15 text-emerald-100";
+  }
   return "border-sky-700/50 bg-sky-500/15 text-sky-100";
 }
 
@@ -276,7 +285,7 @@ export function App() {
 
   const indexLabel = health
     ? health.status === "ok"
-      ? "LBL + Dómar online"
+      ? "LBL + Dómar + Stjórnartíðindi online"
       : "One or more indexes unreachable"
     : "Checking indexes…";
 
@@ -290,7 +299,8 @@ export function App() {
                 Heimdallur
               </div>
               <div className="text-sm text-slate-300">
-                Exact person search across Lögbirtingablað and court judgments.
+                Exact person search across Lögbirtingablað, court judgments, and
+                Stjórnartíðindi.
               </div>
             </div>
             <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 text-xs text-slate-300">
@@ -367,7 +377,8 @@ export function App() {
                       {(
                         [
                           ["lbl", "Lögbirtingablað", report.by_source.lbl],
-                          ["domar", "Dómar", report.by_source.domar]
+                          ["domar", "Dómar", report.by_source.domar],
+                          ["st", "Stjórnartíðindi", report.by_source.st ?? 0]
                         ] as const
                       ).map(([key, label, n]) => (
                         <li key={key}>
@@ -496,7 +507,7 @@ export function App() {
             </div>
           ) : (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/20 p-6 text-sm text-slate-300">
-              Search a person by full name or kennitala. Results from both
+              Search a person by full name or kennitala. Results from all
               indexes are merged into one timeline.
             </div>
           )}
