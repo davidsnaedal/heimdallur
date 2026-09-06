@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-type Source = "lbl" | "domar" | "st";
+type Source = "lbl" | "domar" | "st" | "uppbod";
 
 type Hit = {
   source: Source;
@@ -27,6 +27,13 @@ type Hit = {
     publication_number?: string;
     department?: string;
     type_title?: string;
+    lot_id?: string;
+    lot_type?: string;
+    auction_type?: string;
+    office?: string;
+    respondent?: string;
+    petitioners?: string;
+    auction_date?: string | null;
   };
 };
 
@@ -36,7 +43,7 @@ type SearchReport = {
   kennitala: string | null;
   name: string | null;
   total: number;
-  by_source: { lbl: number; domar: number; st: number };
+  by_source: { lbl: number; domar: number; st: number; uppbod: number };
   by_year: Record<string, number>;
   by_type: Record<string, number>;
   by_court: Record<string, number>;
@@ -85,6 +92,51 @@ function renderHighlighted(text: string) {
   return parts;
 }
 
+const SESSION_EXPIRED_MESSAGE =
+  "Microsoft sign-in expired. Reload the page to sign in again.";
+
+function isPublicSearchHost(): boolean {
+  return (
+    typeof window !== "undefined" && /\.dsna\.codes$/i.test(window.location.hostname)
+  );
+}
+
+function isSessionExpiredResponse(res: Response): boolean {
+  if (res.type === "opaqueredirect") return true;
+  if (res.status === 401 || res.status === 403) return true;
+  const loc = `${res.headers.get("Location") || ""} ${res.url || ""}`;
+  if (res.status >= 300 && res.status < 400) {
+    return /outpost\.goauthentik|auth\.dsna\.codes|\/if\/flow|\/application\/o\/authorize/.test(
+      loc
+    );
+  }
+  if (res.redirected) {
+    return /outpost\.goauthentik|auth\.dsna\.codes|\/if\/flow/.test(res.url);
+  }
+  return false;
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      ...init,
+      redirect: "manual"
+    });
+    if (isSessionExpiredResponse(res)) {
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
+    return res;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message === SESSION_EXPIRED_MESSAGE) throw e;
+    const msg = e instanceof Error ? e.message : "";
+    if (isPublicSearchHost() && /failed to fetch|networkerror|load failed/i.test(msg)) {
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
+    throw e;
+  }
+}
+
 function resolveApiBase(): string {
   const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
   if (raw && raw.trim() !== "") return raw.trim();
@@ -102,6 +154,9 @@ function previewSrc(hit: Hit): string {
   }
   if (hit.source === "st" && hit.source_url) {
     url.searchParams.set("url", hit.source_url);
+  }
+  if (hit.source === "uppbod") {
+    return "";
   }
   if (hit.source === "domar") {
     url.searchParams.set("id", hit.id);
@@ -138,8 +193,8 @@ function PdfPreviewModal({
 
   if (!open || !hit) return null;
 
-  const embedUrl = previewSrc(hit);
-  const showFallback = status === "error";
+  const embedUrl = hit.source === "uppbod" ? "" : previewSrc(hit);
+  const showFallback = hit.source === "uppbod" || status === "error" || !embedUrl;
 
   return (
     <div
@@ -186,7 +241,7 @@ function PdfPreviewModal({
           </div>
         </div>
         <div className="relative h-[70vh] bg-slate-950">
-          {status === "loading" ? (
+          {status === "loading" && embedUrl ? (
             <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center">
               <div className="rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2 text-sm text-slate-200">
                 Loading preview…
@@ -196,10 +251,17 @@ function PdfPreviewModal({
           {showFallback ? (
             <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
               <div className="max-w-lg rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-200">
-                Preview unavailable in-page. Use Open source instead.
+                {hit.source === "uppbod" ? (
+                  <div className="whitespace-pre-wrap leading-6">
+                    {hit.preview ? renderHighlighted(hit.preview) : "No extra text on this lot."}
+                  </div>
+                ) : (
+                  "Preview unavailable in-page. Use Open source instead."
+                )}
               </div>
             </div>
           ) : null}
+          {embedUrl ? (
           <iframe
             key={embedUrl}
             title={`Preview: ${hit.title}`}
@@ -211,6 +273,7 @@ function PdfPreviewModal({
             onLoad={() => setStatus("loaded")}
             onError={() => setStatus("error")}
           />
+          ) : null}
         </div>
       </div>
     </div>
@@ -223,6 +286,9 @@ function sourceBadge(source: Source) {
   }
   if (source === "st") {
     return "border-emerald-700/50 bg-emerald-500/15 text-emerald-100";
+  }
+  if (source === "uppbod") {
+    return "border-violet-700/50 bg-violet-500/15 text-violet-100";
   }
   return "border-sky-700/50 bg-sky-500/15 text-sky-100";
 }
@@ -267,7 +333,7 @@ export function App() {
       const url = new URL("/api/search", apiBase);
       url.searchParams.set("q", q.trim());
       url.searchParams.set("limit", "200");
-      const res = await fetch(url.toString());
+      const res = await apiFetch(url.toString());
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         const detail =
@@ -285,7 +351,7 @@ export function App() {
 
   const indexLabel = health
     ? health.status === "ok"
-      ? "LBL + Dómar + Stjórnartíðindi online"
+      ? "LBL + Dómar + Stjórnartíðindi + Uppboð online"
       : "One or more indexes unreachable"
     : "Checking indexes…";
 
@@ -299,8 +365,8 @@ export function App() {
                 Heimdallur
               </div>
               <div className="text-sm text-slate-300">
-                Exact person search across Lögbirtingablað, court judgments, and
-                Stjórnartíðindi.
+                Exact person search across Lögbirtingablað, court judgments,
+                Stjórnartíðindi, and sýslumenn auctions.
               </div>
             </div>
             <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 text-xs text-slate-300">
@@ -334,8 +400,17 @@ export function App() {
               </button>
             </div>
             {error ? (
-              <div className="mt-3 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-                {error}
+              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200 sm:flex-row sm:items-center sm:justify-between">
+                <div>{error}</div>
+                {error === SESSION_EXPIRED_MESSAGE ? (
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="shrink-0 rounded-lg border border-red-800/80 bg-red-900/50 px-3 py-1.5 text-xs font-medium text-red-50 hover:bg-red-900"
+                  >
+                    Reload and sign in
+                  </button>
+                ) : null}
               </div>
             ) : null}
             <div className="mt-3 text-xs text-slate-400">
@@ -378,7 +453,8 @@ export function App() {
                         [
                           ["lbl", "Lögbirtingablað", report.by_source.lbl],
                           ["domar", "Dómar", report.by_source.domar],
-                          ["st", "Stjórnartíðindi", report.by_source.st ?? 0]
+                          ["st", "Stjórnartíðindi", report.by_source.st ?? 0],
+                          ["uppbod", "Uppboð", report.by_source.uppbod ?? 0]
                         ] as const
                       ).map(([key, label, n]) => (
                         <li key={key}>

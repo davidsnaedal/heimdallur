@@ -6,9 +6,11 @@ services:
       LBL_API_URL: http://logbirting-search-backend-1:8000
       DOMAR_API_URL: http://domar-search-backend-1:8000
       ST_API_URL: http://stjornartidindi-search-backend-1:8000
+      UPPBOD_API_URL: http://uppbod-search-backend-1:8000
       LBL_PUBLIC_URL: https://lbl.dsna.codes
       DOMAR_PUBLIC_URL: https://judgements.dsna.codes
       ST_PUBLIC_URL: https://stjornartidindi.dsna.codes
+      UPPBOD_PUBLIC_URL: https://uppbod.dsna.codes
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -18,6 +20,7 @@ services:
       - lbl
       - domar
       - st
+      - uppbod
 
   web:
     build:
@@ -49,3 +52,6 @@ networks:
   st:
     external: true
     name: stjornartidindi-search_default
+  uppbod:
+    external: true
+    name: uppbod-search_default

@@ -20,6 +20,8 @@ from app.settings import (
     SEARCH_TIMEOUT_SECONDS,
     ST_API_URL,
     ST_PUBLIC_URL,
+    UPPBOD_API_URL,
+    UPPBOD_PUBLIC_URL,
     USER_AGENT,
 )
 
@@ -177,6 +179,48 @@ def _st_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _uppbod_hits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for h in payload.get("hits") or []:
+        date = h.get("auction_date")
+        year = h.get("year") or ((date or "")[:4] or None)
+        open_url = h.get("source_url") or UPPBOD_PUBLIC_URL
+        out.append(
+            {
+                "source": "uppbod",
+                "source_label": "Uppboð",
+                "id": str(h.get("id")),
+                "title": h.get("lot_name") or h.get("lot_id") or "Uppboð",
+                "subtitle": " · ".join(
+                    p
+                    for p in (
+                        h.get("office"),
+                        h.get("lot_type"),
+                        h.get("auction_type"),
+                        h.get("respondent"),
+                    )
+                    if p
+                ),
+                "date": date,
+                "year": year,
+                "preview": h.get("preview") or "",
+                "source_url": open_url,
+                "open_url": open_url,
+                "preview_kind": "uppbod",
+                "meta": {
+                    "lot_id": h.get("lot_id"),
+                    "lot_type": h.get("lot_type"),
+                    "auction_type": h.get("auction_type"),
+                    "office": h.get("office"),
+                    "respondent": h.get("respondent"),
+                    "petitioners": h.get("petitioners"),
+                    "auction_date": date,
+                },
+            }
+        )
+    return out
+
+
 def _sort_key(hit: dict[str, Any]) -> tuple:
     date = (hit.get("date") or hit.get("year") or "")[:10]
     return (date == "", date, hit.get("source") or "", hit.get("id") or "")
@@ -189,6 +233,7 @@ def health() -> dict[str, Any]:
         ("lbl", LBL_API_URL),
         ("domar", DOMAR_API_URL),
         ("st", ST_API_URL),
+        ("uppbod", UPPBOD_API_URL),
     ):
         try:
             with httpx.Client(timeout=5.0, headers={"User-Agent": USER_AGENT}) as client:
@@ -216,6 +261,7 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
     lbl_payload: dict[str, Any] | None = None
     domar_payload: dict[str, Any] | None = None
     st_payload: dict[str, Any] | None = None
+    uppbod_payload: dict[str, Any] | None = None
 
     def _lbl() -> dict[str, Any]:
         return _fetch_exact(LBL_API_URL, parsed.raw, limit)
@@ -226,10 +272,14 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
     def _st() -> dict[str, Any]:
         return _fetch_exact(ST_API_URL, parsed.raw, limit)
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    def _uppbod() -> dict[str, Any]:
+        return _fetch_exact(UPPBOD_API_URL, parsed.raw, limit)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
         fut_lbl = pool.submit(_lbl)
         fut_domar = pool.submit(_domar)
         fut_st = pool.submit(_st)
+        fut_uppbod = pool.submit(_uppbod)
         try:
             lbl_payload = fut_lbl.result()
         except ValueError as e:
@@ -251,6 +301,13 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         except RuntimeError as e:
             log.warning("Stjornartidindi exact failed for %r: %s", parsed.raw, e)
             warnings.append(f"Stjórnartíðindi: {e}")
+        try:
+            uppbod_payload = fut_uppbod.result()
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except RuntimeError as e:
+            log.warning("Uppbod exact failed for %r: %s", parsed.raw, e)
+            warnings.append(f"Uppboð: {e}")
 
     hits = []
     if lbl_payload:
@@ -259,12 +316,15 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         hits.extend(_domar_hits(domar_payload))
     if st_payload:
         hits.extend(_st_hits(st_payload))
+    if uppbod_payload:
+        hits.extend(_uppbod_hits(uppbod_payload))
     hits.sort(key=_sort_key, reverse=True)
 
     by_source = {
         "lbl": 0 if not lbl_payload else int(lbl_payload.get("total") or 0),
         "domar": 0 if not domar_payload else int(domar_payload.get("total") or 0),
         "st": 0 if not st_payload else int(st_payload.get("total") or 0),
+        "uppbod": 0 if not uppbod_payload else int(uppbod_payload.get("total") or 0),
     }
     by_year: dict[str, int] = {}
     for h in hits:
@@ -276,6 +336,7 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
         f'{by_source["lbl"]} Lögbirtingablað',
         f'{by_source["domar"]} dómur/dómar',
         f'{by_source["st"]} Stjórnartíðindi',
+        f'{by_source["uppbod"]} uppboð',
     ]
     summary = f'Exact matches for “{parsed.raw}”: {len(hits)} ({", ".join(bits)}).'
     if parsed.kennitala:
@@ -300,6 +361,7 @@ def search_api(q: str, limit: int = 200) -> dict[str, Any]:
             "lbl": LBL_PUBLIC_URL,
             "domar": DOMAR_PUBLIC_URL,
             "st": ST_PUBLIC_URL,
+            "uppbod": UPPBOD_PUBLIC_URL,
         },
     }
 
@@ -340,7 +402,7 @@ def _assert_lbl_pdf_url(url: str) -> str:
 
 @app.get("/api/preview")
 def preview_api(
-    source: str = Query(..., description="lbl, domar, or st"),
+    source: str = Query(..., description="lbl, domar, st, or uppbod"),
     url: str = Query("", description="LBL or Stjórnartíðindi PDF URL"),
     id: str = Query("", description="island.is verdict id"),
 ):
